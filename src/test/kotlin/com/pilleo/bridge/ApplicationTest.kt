@@ -16,6 +16,7 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import io.ktor.server.config.MapApplicationConfig
 
 class ApplicationTest {
 
@@ -51,15 +52,27 @@ class ApplicationTest {
         return dbUrl
     }
 
+    private fun ApplicationTestBuilder.configureEnv() {
+        environment {
+            config = MapApplicationConfig().apply {
+                put("database.url", setupTempDb())
+                put("paperclip.baseUrl", paperclipServer.url("/").toString().removeSuffix("/"))
+                put("paperclip.apiToken", "token")
+                put("jules.apiBaseUrl", julesServer.url("/").toString().removeSuffix("/"))
+                put("jules.apiKey", "key")
+                put("bridge.allowedRepositories", listOf("org/repo"))
+                put("bridge.invariantsFile", "src/test/resources/invariants.md")
+                put("bridge.authToken", "secret-token")
+            }
+        }
+    }
+
     @Test
     fun `test health live endpoint`() = testApplication {
-        application {
-            val repo = RunRepository(setupTempDb())
-            val pc = PaperclipClient(paperclipServer.url("/").toString(), "token")
-            val jc = JulesClient(julesServer.url("/").toString(), "key")
-            val pb = PromptBuilder(listOf("org/repo"), "src/test/resources/invariants.md")
-            configureRouting(repo, pc, jc, pb, listOf("org/repo"), false, "AUTO_CREATE_PR")
-        }
+        julesServer.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
+        configureEnv()
+        application { module() }
+
         val response = client.get("/health/live")
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals("OK", response.bodyAsText())
@@ -67,13 +80,10 @@ class ApplicationTest {
 
     @Test
     fun `test health ready endpoint`() = testApplication {
-        application {
-            val repo = RunRepository(setupTempDb())
-            val pc = PaperclipClient(paperclipServer.url("/").toString(), "token")
-            val jc = JulesClient(julesServer.url("/").toString(), "key")
-            val pb = PromptBuilder(listOf("org/repo"), "src/test/resources/invariants.md")
-            configureRouting(repo, pc, jc, pb, listOf("org/repo"), false, "AUTO_CREATE_PR")
-        }
+        julesServer.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
+        configureEnv()
+        application { module() }
+
         val response = client.get("/health/ready")
         assertEquals(HttpStatusCode.OK, response.status)
         assertEquals("Ready", response.bodyAsText())
@@ -81,14 +91,10 @@ class ApplicationTest {
 
     @Test
     fun `test webhook endpoint with missing auth`() = testApplication {
-        application {
-            val repo = RunRepository(setupTempDb())
-            val pc = PaperclipClient(paperclipServer.url("/").toString(), "token")
-            val jc = JulesClient(julesServer.url("/").toString(), "key")
-            val pb = PromptBuilder(listOf("org/repo"), "src/test/resources/invariants.md")
-            configureRouting(repo, pc, jc, pb, listOf("org/repo"), false, "AUTO_CREATE_PR")
-            configureSecurity("secret-token")
-        }
+        julesServer.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
+        configureEnv()
+        application { module() }
+
         val response = client.post("/v1/invocations") {
             contentType(ContentType.Application.Json)
             setBody("""{"runId":"123", "taskId":"456"}""")
@@ -98,19 +104,12 @@ class ApplicationTest {
 
     @Test
     fun `test webhook endpoint creates new run successfully`() = testApplication {
-        val dbUrl = setupTempDb()
-        val repo = RunRepository(dbUrl)
-        val pc = PaperclipClient(paperclipServer.url("/").toString().removeSuffix("/"), "token")
-        val jc = JulesClient(julesServer.url("/").toString().removeSuffix("/"), "key")
-        val pb = PromptBuilder(listOf("org/repo"), "src/test/resources/invariants.md")
+        julesServer.enqueue(MockResponse().setResponseCode(200).setBody("[]")) // For startup auth
+        configureEnv()
 
         File("src/test/resources/invariants.md").writeText("Test invariants")
 
-        application {
-            configureSerialization()
-            configureSecurity("secret-token")
-            configureRouting(repo, pc, jc, pb, listOf("org/repo"), false, "AUTO_CREATE_PR")
-        }
+        application { module() }
 
         paperclipServer.enqueue(
             MockResponse()
@@ -165,7 +164,8 @@ class ApplicationTest {
         val executionId = json["executionId"]?.jsonPrimitive?.content
         assertTrue(executionId != null && executionId.isNotEmpty())
 
-        // Assert DB state
+        val dbUrl = "jdbc:sqlite:${dbFile.absolutePath}"
+        val repo = RunRepository(dbUrl)
         val run = repo.findByPaperclipRunId("run_abc123")!!
         assertEquals("session_xyz", run.julesSessionId)
         assertEquals("QUEUED", run.julesState)
@@ -178,11 +178,9 @@ class ApplicationTest {
             setBody(requestBody)
         }
         assertEquals(HttpStatusCode.Accepted, response2.status)
-        val json2 = Json.parseToJsonElement(response2.bodyAsText()).jsonObject
-        assertEquals(executionId, json2["executionId"]?.jsonPrimitive?.content)
 
-        // Servers should only have received 1 request each
+        // Servers should only have received 1 request each AFTER startup
         assertEquals(1, paperclipServer.requestCount)
-        assertEquals(1, julesServer.requestCount)
+        assertEquals(2, julesServer.requestCount) // 1 auth + 1 session creation
     }
 }

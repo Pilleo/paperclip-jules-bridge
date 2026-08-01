@@ -10,6 +10,7 @@ import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.flywaydb.core.Flyway
@@ -57,6 +58,11 @@ fun Application.module() {
     val requirePlanApproval = config.propertyOrNull("jules.requirePlanApproval")?.getString()?.toBoolean() ?: false
     val automationMode = config.propertyOrNull("jules.automationMode")?.getString() ?: "AUTO_CREATE_PR"
     val julesClient = JulesClient(julesApiBaseUrl, julesApiKey)
+
+    // Validate Auth upon start
+    runBlocking {
+        julesClient.validateAuth()
+    }
 
     val allowedRepositories = config.property("bridge.allowedRepositories").getList()
     val invariantsFile = config.property("bridge.invariantsFile").getString()
