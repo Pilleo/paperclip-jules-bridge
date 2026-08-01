@@ -14,11 +14,12 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.flywaydb.core.Flyway
+import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.UUID
+import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
-    // Load .env or .ENV into System Properties if they exist (for IDE execution natively)
     listOf(File(".env"), File(".ENV")).forEach { envFile ->
         if (envFile.exists()) {
             envFile.readLines().forEach { line ->
@@ -37,11 +38,11 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
+    val logger = LoggerFactory.getLogger("Application")
     val config = environment.config
 
     val dbUrl = config.propertyOrNull("database.url")?.getString() ?: "jdbc:sqlite:runs.sqlite"
 
-    // Run Migrations
     Flyway.configure()
         .dataSource(dbUrl, "", "")
         .load()
@@ -59,9 +60,13 @@ fun Application.module() {
     val automationMode = config.propertyOrNull("jules.automationMode")?.getString() ?: "AUTO_CREATE_PR"
     val julesClient = JulesClient(julesApiBaseUrl, julesApiKey)
 
-    // Validate Auth upon start
-    runBlocking {
-        julesClient.validateAuth()
+    try {
+        runBlocking {
+            julesClient.validateAuth()
+        }
+    } catch (e: Exception) {
+        logger.error("Startup Failed: Jules API Authentication is invalid. Halting process.", e)
+        exitProcess(1)
     }
 
     val allowedRepositories = config.property("bridge.allowedRepositories").getList()

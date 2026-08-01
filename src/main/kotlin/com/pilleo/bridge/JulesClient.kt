@@ -87,11 +87,19 @@ class JulesClient(
     }
 
     suspend fun validateAuth() {
-        val response = httpClient.get("$baseUrl/sessions?pageSize=1") {
-            header("x-goog-api-key", apiKey)
+        val response = try {
+            httpClient.get("$baseUrl/sessions?pageSize=1") {
+                header("x-goog-api-key", apiKey)
+            }
+        } catch (e: Exception) {
+            throw IllegalStateException("Network failure reaching Jules API for validation", e)
         }
+
         if (response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.Forbidden) {
             throw IllegalStateException("Jules API Key is invalid or unauthorized: ${response.status}")
+        }
+        if (!response.status.isSuccess()) {
+             throw IllegalStateException("Jules API Auth validation failed with unexpected status: ${response.status}")
         }
     }
 
