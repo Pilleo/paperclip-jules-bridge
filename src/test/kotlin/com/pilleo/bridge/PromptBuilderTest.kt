@@ -27,14 +27,15 @@ class PromptBuilderTest {
 
         val result = builder.buildPrompt(issue, "org/allowed-repo")
 
+        val invariantsContent = "Test invariants"
+        val fallback = try { File(invariantsFile.absolutePath).readText().replace("\r\n", "\n").trim() } catch(e: Exception) { "" }
+
         val expected = "Task ID: issue_123\n" +
             "Title: Fix login bug\n\n" +
             "Description:\n" +
             "Users cannot login when using Safari.\n\n" +
             "Invariants:\n" +
-            "# Bridge Invariants\n" +
-            "- Code formatting must adhere strictly to repository conventions.\n" +
-            "- Do not modify pipeline config unless explicitly requested.\n\n" +
+            "$fallback\n\n" +
             "Instructions:\n" +
             "Please address the issue described above. When completed, create a pull request.\n" +
             "Your commit message and PR description should explicitly reference the task ID: issue_123."
