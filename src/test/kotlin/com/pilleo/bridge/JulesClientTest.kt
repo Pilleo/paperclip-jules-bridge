@@ -13,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class JulesClientTest {
 
@@ -116,5 +118,46 @@ class JulesClientTest {
         val session = client.getSession("session_123")
         assertEquals("session_123", session.id)
         assertEquals(3, mockWebServer.requestCount)
+    }
+
+    @Test
+    fun `test createSession fails on unhandled status`() = runBlocking {
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+
+        assertFailsWith<IllegalStateException> {
+            client.createSession(JulesSessionRequest("prompt", "title", SourceContext("src", GithubRepoContext("main"))))
+        }
+    }
+
+    @Test
+    fun `test validateAuth throws IllegalStateException on 401`() = runBlocking {
+        mockWebServer.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
+
+        val exception = assertFailsWith<IllegalStateException> {
+            client.validateAuth()
+        }
+        assertTrue(exception.message!!.contains("Jules API Key is invalid or unauthorized"))
+    }
+
+    @Test
+    fun `test validateAuth throws IllegalStateException on 400`() = runBlocking {
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
+
+        val exception = assertFailsWith<IllegalStateException> {
+            client.validateAuth()
+        }
+        assertTrue(exception.message!!.contains("unexpected status: 400"))
+    }
+
+    @Test
+    fun `test validateAuth throws on network failure`() = runBlocking {
+        val brokenClient = JulesClient("http://localhost:1", "key") // Unreachable port
+        val exception = assertFailsWith<IllegalStateException> {
+            brokenClient.validateAuth()
+        }
+        assertTrue(exception.message!!.contains("Network failure reaching Jules API for validation"))
     }
 }
