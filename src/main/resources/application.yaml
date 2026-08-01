@@ -1,0 +1,20 @@
+bridge:
+  authToken: ${BRIDGE_AUTH_TOKEN}
+  allowedRepositories:
+    - "Pilleo/mazewall"
+  invariantsFile: ${BRIDGE_INVARIANTS_FILE:-/config/invariants.md}
+
+jules:
+  apiBaseUrl: "https://jules.googleapis.com/v1alpha"
+  apiKey: ${JULES_API_KEY}
+  requirePlanApproval: false
+  automationMode: "AUTO_CREATE_PR"
+
+paperclip:
+  baseUrl: ${PAPERCLIP_BASE_URL}
+  apiToken: ${PAPERCLIP_API_TOKEN}
+
+polling:
+  intervalSeconds: 45
+  maxIntervalSeconds: 300
+  maxSessionAgeHours: 12
