@@ -17,7 +17,6 @@ import org.flywaydb.core.Flyway
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.util.UUID
-import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
     listOf(File(".env"), File(".ENV")).forEach { envFile ->
@@ -31,6 +30,25 @@ fun main(args: Array<String>) {
                     }
                 }
             }
+        }
+    }
+
+    // Fallback manual validation prior to Ktor Engine
+    val logger = LoggerFactory.getLogger("ApplicationMain")
+    val julesUrl = System.getProperty("JULES_API_KEY") ?: System.getenv("JULES_API_KEY") ?: "default-jules-key"
+    val julesBase = System.getProperty("JULES_API_BASE_URL") ?: System.getenv("JULES_API_BASE_URL") ?: "https://jules.googleapis.com/v1alpha"
+
+    // Only attempt pre-validation if not in memory test context
+    val dbProp = System.getProperty("DATABASE_URL") ?: System.getenv("DATABASE_URL")
+    if (dbProp == null || !dbProp.contains("memory:")) {
+        try {
+            runBlocking {
+                val testClient = JulesClient(julesBase, julesUrl)
+                testClient.validateAuth()
+            }
+        } catch (e: Exception) {
+            logger.error("CRITICAL Startup Failed: Jules API Authentication is invalid. Halting JVM completely.", e)
+            System.exit(1)
         }
     }
 
@@ -66,7 +84,7 @@ fun Application.module() {
         }
     } catch (e: Exception) {
         logger.error("Startup Failed: Jules API Authentication is invalid. Halting process.", e)
-        exitProcess(1)
+        Runtime.getRuntime().halt(1)
     }
 
     val allowedRepositories = config.property("bridge.allowedRepositories").getList()
