@@ -1,6 +1,9 @@
 ktor:
   deployment:
     port: 8080
+  application:
+    modules:
+      - com.pilleo.bridge.ApplicationKt.module
 
 bridge:
   authToken: "$BRIDGE_AUTH_TOKEN"

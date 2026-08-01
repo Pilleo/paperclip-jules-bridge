@@ -11,6 +11,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.flywaydb.core.Flyway
@@ -33,12 +34,12 @@ fun main(args: Array<String>) {
         }
     }
 
-    // Fallback manual validation prior to Ktor Engine
+    // Validate Jules Authentication BEFORE starting the Ktor Netty engine completely.
+    // This avoids blocking the Netty EventLoop and safely halts the JVM explicitly if invalid.
     val logger = LoggerFactory.getLogger("ApplicationMain")
     val julesUrl = System.getProperty("JULES_API_KEY") ?: System.getenv("JULES_API_KEY") ?: "default-jules-key"
     val julesBase = System.getProperty("JULES_API_BASE_URL") ?: System.getenv("JULES_API_BASE_URL") ?: "https://jules.googleapis.com/v1alpha"
 
-    // Only attempt pre-validation if not in memory test context
     val dbProp = System.getProperty("DATABASE_URL") ?: System.getenv("DATABASE_URL")
     if (dbProp == null || !dbProp.contains("memory:")) {
         try {
@@ -48,7 +49,7 @@ fun main(args: Array<String>) {
             }
         } catch (e: Exception) {
             logger.error("CRITICAL Startup Failed: Jules API Authentication is invalid. Halting JVM completely.", e)
-            System.exit(1)
+            Runtime.getRuntime().halt(1)
         }
     }
 
@@ -56,7 +57,6 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
-    val logger = LoggerFactory.getLogger("Application")
     val config = environment.config
 
     val dbUrl = config.propertyOrNull("database.url")?.getString() ?: "jdbc:sqlite:runs.sqlite"
@@ -77,15 +77,6 @@ fun Application.module() {
     val requirePlanApproval = config.propertyOrNull("jules.requirePlanApproval")?.getString()?.toBoolean() ?: false
     val automationMode = config.propertyOrNull("jules.automationMode")?.getString() ?: "AUTO_CREATE_PR"
     val julesClient = JulesClient(julesApiBaseUrl, julesApiKey)
-
-    try {
-        runBlocking {
-            julesClient.validateAuth()
-        }
-    } catch (e: Exception) {
-        logger.error("Startup Failed: Jules API Authentication is invalid. Halting process.", e)
-        Runtime.getRuntime().halt(1)
-    }
 
     val allowedRepositories = config.property("bridge.allowedRepositories").getList()
     val invariantsFile = config.property("bridge.invariantsFile").getString()
