@@ -4,10 +4,12 @@ import io.ktor.server.testing.*
 import io.ktor.server.config.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
+import kotlin.system.exitProcess
 
 class ApplicationConfigTest {
 
@@ -48,7 +50,6 @@ class ApplicationConfigTest {
             module()
         }
 
-        // If it starts and config loads without exception, we're good
         assertTrue(true)
     }
 }
