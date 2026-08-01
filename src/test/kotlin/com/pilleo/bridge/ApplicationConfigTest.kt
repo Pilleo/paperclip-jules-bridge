@@ -11,6 +11,7 @@ class ApplicationConfigTest {
     fun `test module loads config correctly`() = testApplication {
         environment {
             config = MapApplicationConfig().apply {
+                put("ktor.deployment.port", "8080")
                 put("database.url", "jdbc:sqlite::memory:")
                 put("paperclip.baseUrl", "http://paperclip")
                 put("paperclip.apiToken", "token")
