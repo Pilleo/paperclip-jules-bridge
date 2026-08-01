@@ -204,4 +204,24 @@ class RunRepository(private val jdbcUrl: String) {
             }
         }
     }
+
+    fun updateRunStartDetails(runId: String, promptHash: String, julesSessionId: String, julesState: String) {
+        withConnection { conn ->
+            conn.prepareStatement(
+                """
+                UPDATE runs
+                SET prompt_hash = ?, jules_session_id = ?, jules_state = ?, state = ?, updated_at = ?
+                WHERE id = ?
+                """.trimIndent()
+            ).use { stmt ->
+                stmt.setString(1, promptHash)
+                stmt.setString(2, julesSessionId)
+                stmt.setString(3, julesState)
+                stmt.setString(4, "SESSION_RUNNING")
+                stmt.setString(5, Instant.now().toString())
+                stmt.setString(6, runId)
+                stmt.executeUpdate()
+            }
+        }
+    }
 }

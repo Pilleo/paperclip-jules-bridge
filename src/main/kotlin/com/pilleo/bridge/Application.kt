@@ -12,16 +12,60 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.flywaydb.core.Flyway
 import java.util.UUID
 
-fun main(args: Array<String>) {
-    embeddedServer(Netty, port = 8080, module = Application::module).start(wait = true)
-}
+fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
 
 fun Application.module() {
+    val config = environment.config
+
+    val dbUrl = config.propertyOrNull("database.url")?.getString() ?: "jdbc:sqlite:runs.sqlite"
+
+    // Run Migrations
+    Flyway.configure()
+        .dataSource(dbUrl, "", "")
+        .load()
+        .migrate()
+
+    val repository = RunRepository(dbUrl)
+
+    val paperclipBaseUrl = config.property("paperclip.baseUrl").getString()
+    val paperclipApiToken = config.property("paperclip.apiToken").getString()
+    val paperclipClient = PaperclipClient(paperclipBaseUrl, paperclipApiToken)
+
+    val julesApiBaseUrl = config.property("jules.apiBaseUrl").getString()
+    val julesApiKey = config.property("jules.apiKey").getString()
+    val requirePlanApproval = config.propertyOrNull("jules.requirePlanApproval")?.getString()?.toBoolean() ?: false
+    val automationMode = config.propertyOrNull("jules.automationMode")?.getString() ?: "AUTO_CREATE_PR"
+    val julesClient = JulesClient(julesApiBaseUrl, julesApiKey)
+
+    val allowedRepositories = config.property("bridge.allowedRepositories").getList()
+    val invariantsFile = config.property("bridge.invariantsFile").getString()
+    val promptBuilder = PromptBuilder(allowedRepositories, invariantsFile)
+
+    val bridgeAuthToken = config.property("bridge.authToken").getString()
+
+    val pollIntervalSeconds = config.propertyOrNull("polling.intervalSeconds")?.getString()?.toLong() ?: 45
+    val maxSessionAgeHours = config.propertyOrNull("polling.maxSessionAgeHours")?.getString()?.toLong() ?: 12
+
+    val pollingWorker = PollingWorker(
+        repository = repository,
+        julesClient = julesClient,
+        paperclipClient = paperclipClient,
+        pollIntervalSeconds = pollIntervalSeconds,
+        maxSessionAgeHours = maxSessionAgeHours
+    )
+
+    pollingWorker.start()
+
+    environment.monitor.subscribe(ApplicationStopping) {
+        pollingWorker.stop()
+    }
+
     configureSerialization()
-    // configureSecurity()
-    // configureRouting(repo)
+    configureSecurity(bridgeAuthToken)
+    configureRouting(repository, paperclipClient, julesClient, promptBuilder, allowedRepositories, requirePlanApproval, automationMode)
 }
 
 fun Application.configureSerialization() {
@@ -39,9 +83,11 @@ fun Application.configureSecurity(expectedToken: String) {
         status(HttpStatusCode.Unauthorized) { call, _ ->
             call.respond(HttpStatusCode.Unauthorized, "Unauthorized")
         }
+        exception<Throwable> { call, cause ->
+            call.respond(HttpStatusCode.InternalServerError, cause.localizedMessage ?: "Internal Server Error")
+        }
     }
 
-    // Simple custom interceptor for Bearer token validation
     intercept(ApplicationCallPipeline.Plugins) {
         val path = call.request.path()
         if (path == "/v1/invocations") {
@@ -70,34 +116,96 @@ data class InvocationResponse(
     val executionId: String
 )
 
-fun Application.configureRouting(repository: RunRepository) {
+fun Application.configureRouting(
+    repository: RunRepository,
+    paperclipClient: PaperclipClient,
+    julesClient: JulesClient,
+    promptBuilder: PromptBuilder,
+    allowedRepositories: List<String>,
+    requirePlanApproval: Boolean,
+    automationMode: String
+) {
     routing {
         get("/health/live") {
             call.respondText("OK", status = HttpStatusCode.OK)
         }
 
         get("/health/ready") {
+            // Since we ran migrations on boot, this is a basic readiness check.
             call.respondText("Ready", status = HttpStatusCode.OK)
         }
 
         post("/v1/invocations") {
             val payload = call.receive<InvocationPayload>()
-
-            // Generate a unique execution ID for this run attempt
             val executionId = UUID.randomUUID().toString()
-
-            // Prefer issueId, fallback to taskId
             val effectiveTaskId = payload.issueId ?: payload.taskId ?: "unknown"
 
+            val targetRepository = allowedRepositories.firstOrNull() ?: "unknown"
+            val baseBranch = "main"
+
+            // 1. Persist run initially
             val finalExecutionId = repository.insertIfAbsent(
                 runId = executionId,
                 paperclipRunId = payload.runId,
                 paperclipTaskId = effectiveTaskId,
-                repository = "unknown", // Will be filled later by prompt builder/config
-                baseBranch = "main", // Default
+                repository = targetRepository,
+                baseBranch = baseBranch,
                 promptHash = "pending",
                 state = "RECEIVED"
             )
+
+            // If it's a new run, we need to process it. Otherwise just return existing executionId
+            if (finalExecutionId == executionId) {
+                // Async or background task to create session. For now we will do it inline or we can let a background worker do it.
+                // Based on plan: "handle failures gracefully... while still returning a 202"
+                // The webhook endpoint should return quickly. Let's do a fast best-effort inline, or we could defer entirely to worker.
+                // Wait, architecture plan says:
+                // Invocation API (Ktor route)
+                // ├─ parse payload
+                // ├─ idempotency check on runId
+                // ├─ fetch full issue via Paperclip API
+                // ├─ build Jules prompt
+                // ├─ create Jules session
+                // ├─ persist run row
+                // └─ return 202 + executionId
+
+                try {
+                    val issue = paperclipClient.getIssue(effectiveTaskId)
+                    if (issue == null) {
+                        repository.updateState(finalExecutionId, "FAILED")
+                    } else {
+                        val prompt = promptBuilder.buildPrompt(issue, targetRepository)
+                        val promptHash = promptBuilder.hashPrompt(prompt)
+
+                        val sessionReq = JulesSessionRequest(
+                            prompt = prompt,
+                            title = "Issue: ${issue.title}",
+                            sourceContext = SourceContext(
+                                source = "sources/github/$targetRepository",
+                                githubRepoContext = GithubRepoContext(startingBranch = baseBranch)
+                            ),
+                            requirePlanApproval = requirePlanApproval,
+                            automationMode = automationMode
+                        )
+
+                        val session = julesClient.createSession(sessionReq)
+
+                        repository.updateSession(
+                            runId = finalExecutionId,
+                            julesSessionId = session.id,
+                            julesSessionUrl = "", // Set to empty or URL if available
+                            julesState = session.state,
+                            state = "SESSION_RUNNING",
+                            prUrl = null
+                        )
+
+                        // Also update the prompt hash and set proper state
+                        repository.updateRunStartDetails(finalExecutionId, promptHash, session.id, session.state) // We don't have access to connection directly here easily, but repository should handle it
+                    }
+                } catch (e: Exception) {
+                    repository.updateState(finalExecutionId, "FAILED")
+                }
+            }
 
             call.respond(HttpStatusCode.Accepted, InvocationResponse("accepted", finalExecutionId))
         }
