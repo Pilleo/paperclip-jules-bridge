@@ -75,3 +75,22 @@ tasks.jacocoTestCoverageVerification {
 tasks.check {
     dependsOn(tasks.jacocoTestCoverageVerification)
 }
+
+tasks.withType<JavaExec> {
+    val envFiles = listOf(file(".env"), file(".ENV"))
+    for (envFile in envFiles) {
+        if (envFile.exists()) {
+            envFile.readLines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                    val split = trimmed.split("=", limit = 2)
+                    if (split.size == 2) {
+                        val key = split[0].trim()
+                        val value = split[1].trim().removeSurrounding("\"").removeSurrounding("'")
+                        environment(key, value)
+                    }
+                }
+            }
+        }
+    }
+}

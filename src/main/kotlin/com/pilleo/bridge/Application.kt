@@ -13,9 +13,27 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.flywaydb.core.Flyway
+import java.io.File
 import java.util.UUID
 
-fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
+fun main(args: Array<String>) {
+    // Load .env or .ENV into System Properties if they exist (for IDE execution natively)
+    listOf(File(".env"), File(".ENV")).forEach { envFile ->
+        if (envFile.exists()) {
+            envFile.readLines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                    val split = trimmed.split("=", limit = 2)
+                    if (split.size == 2 && System.getProperty(split[0].trim()) == null) {
+                        System.setProperty(split[0].trim(), split[1].trim().removeSurrounding("\"").removeSurrounding("'"))
+                    }
+                }
+            }
+        }
+    }
+
+    io.ktor.server.netty.EngineMain.main(args)
+}
 
 fun Application.module() {
     val config = environment.config
@@ -131,7 +149,6 @@ fun Application.configureRouting(
         }
 
         get("/health/ready") {
-            // Since we ran migrations on boot, this is a basic readiness check.
             call.respondText("Ready", status = HttpStatusCode.OK)
         }
 
@@ -143,7 +160,6 @@ fun Application.configureRouting(
             val targetRepository = allowedRepositories.firstOrNull() ?: "unknown"
             val baseBranch = "main"
 
-            // 1. Persist run initially
             val finalExecutionId = repository.insertIfAbsent(
                 runId = executionId,
                 paperclipRunId = payload.runId,
@@ -154,21 +170,7 @@ fun Application.configureRouting(
                 state = "RECEIVED"
             )
 
-            // If it's a new run, we need to process it. Otherwise just return existing executionId
             if (finalExecutionId == executionId) {
-                // Async or background task to create session. For now we will do it inline or we can let a background worker do it.
-                // Based on plan: "handle failures gracefully... while still returning a 202"
-                // The webhook endpoint should return quickly. Let's do a fast best-effort inline, or we could defer entirely to worker.
-                // Wait, architecture plan says:
-                // Invocation API (Ktor route)
-                // ├─ parse payload
-                // ├─ idempotency check on runId
-                // ├─ fetch full issue via Paperclip API
-                // ├─ build Jules prompt
-                // ├─ create Jules session
-                // ├─ persist run row
-                // └─ return 202 + executionId
-
                 try {
                     val issue = paperclipClient.getIssue(effectiveTaskId)
                     if (issue == null) {
@@ -193,14 +195,13 @@ fun Application.configureRouting(
                         repository.updateSession(
                             runId = finalExecutionId,
                             julesSessionId = session.id,
-                            julesSessionUrl = "", // Set to empty or URL if available
+                            julesSessionUrl = "",
                             julesState = session.state,
                             state = "SESSION_RUNNING",
                             prUrl = null
                         )
 
-                        // Also update the prompt hash and set proper state
-                        repository.updateRunStartDetails(finalExecutionId, promptHash, session.id, session.state) // We don't have access to connection directly here easily, but repository should handle it
+                        repository.updateRunStartDetails(finalExecutionId, promptHash, session.id, session.state)
                     }
                 } catch (e: Exception) {
                     repository.updateState(finalExecutionId, "FAILED")
