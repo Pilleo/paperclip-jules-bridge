@@ -1,18 +1,22 @@
+ktor:
+  deployment:
+    port: 8080
+
 bridge:
-  authToken: ${BRIDGE_AUTH_TOKEN}
+  authToken: "$BRIDGE_AUTH_TOKEN"
   allowedRepositories:
     - "Pilleo/mazewall"
-  invariantsFile: ${BRIDGE_INVARIANTS_FILE:-/config/invariants.md}
+  invariantsFile: "$BRIDGE_INVARIANTS_FILE"
 
 jules:
   apiBaseUrl: "https://jules.googleapis.com/v1alpha"
-  apiKey: ${JULES_API_KEY}
+  apiKey: "$JULES_API_KEY"
   requirePlanApproval: false
   automationMode: "AUTO_CREATE_PR"
 
 paperclip:
-  baseUrl: ${PAPERCLIP_BASE_URL}
-  apiToken: ${PAPERCLIP_API_TOKEN}
+  baseUrl: "$PAPERCLIP_BASE_URL"
+  apiToken: "$PAPERCLIP_API_TOKEN"
 
 polling:
   intervalSeconds: 45
