@@ -86,6 +86,15 @@ class JulesClient(
         }
     }
 
+    suspend fun validateAuth() {
+        val response = httpClient.get("$baseUrl/sessions?pageSize=1") {
+            header("x-goog-api-key", apiKey)
+        }
+        if (response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.Forbidden) {
+            throw IllegalStateException("Jules API Key is invalid or unauthorized: ${response.status}")
+        }
+    }
+
     private suspend fun <T> withRetry(maxRetries: Int = 3, block: suspend () -> T): T {
         var currentAttempt = 0
         while (true) {

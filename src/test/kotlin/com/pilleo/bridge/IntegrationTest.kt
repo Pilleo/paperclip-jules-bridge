@@ -61,6 +61,9 @@ class IntegrationTest {
             }
         }
 
+        // Mock startup auth validation
+        julesServer.enqueue(MockResponse().setResponseCode(200).setBody("[]"))
+
         application {
             module()
         }
