@@ -8,26 +8,27 @@ spring:
     virtual:
       enabled: true
   datasource:
-    url: ${DATABASE_URL:jdbc:sqlite:runs.sqlite}
+    url: jdbc:sqlite:runs.sqlite
     driver-class-name: org.sqlite.JDBC
   flyway:
     enabled: true
     baseline-on-migrate: true
+    locations: classpath:db/migration
 
 bridge:
-  authToken: ${BRIDGE_AUTH_TOKEN:default-auth-token}
-  allowedRepositories: ${BRIDGE_ALLOWED_REPOS:Pilleo/mazewall}
-  invariantsFile: ${BRIDGE_INVARIANTS_FILE:/config/invariants.md}
+  authToken: default-auth-token
+  allowedRepositories: Pilleo/mazewall
+  invariantsFile: /config/invariants.md
 
 jules:
-  apiBaseUrl: ${JULES_API_BASE_URL:https://jules.googleapis.com/v1alpha}
-  apiKey: ${JULES_API_KEY:default-jules-key}
+  apiBaseUrl: https://jules.googleapis.com/v1alpha
+  apiKey: default-jules-key
   requirePlanApproval: false
   automationMode: "AUTO_CREATE_PR"
 
 paperclip:
-  baseUrl: ${PAPERCLIP_BASE_URL:http://localhost:8080}
-  apiToken: ${PAPERCLIP_API_TOKEN:default-paperclip-token}
+  baseUrl: http://localhost:8080
+  apiToken: default-paperclip-token
 
 polling:
   intervalSeconds: 45
