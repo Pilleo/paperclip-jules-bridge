@@ -88,6 +88,12 @@ class PaperclipClient(
                 true
             } catch (e: HttpClientErrorException.UnprocessableEntity) {
                 false
+            } catch (e: HttpClientErrorException) {
+                if (e.statusCode.value() == 422) {
+                    false
+                } else {
+                    throw e
+                }
             } catch (e: Exception) {
                 throw e
             }
@@ -112,7 +118,7 @@ class PaperclipClient(
         }
     }
 
-    private suspend fun <T> withRetry(maxRetries: Int = 3, block: () -> T): T {
+    private suspend fun <T> withRetry(maxRetries: Int = 3, block: suspend () -> T): T {
         var currentAttempt = 0
         while (true) {
             try {
@@ -121,6 +127,16 @@ class PaperclipClient(
                 throw e
             } catch (e: HttpClientErrorException.UnprocessableEntity) {
                 throw e
+            } catch (e: HttpClientErrorException) {
+                if (e.statusCode.value() == 422 || e.statusCode.value() == 404) {
+                    throw e
+                }
+                if (currentAttempt >= maxRetries) {
+                    throw e
+                }
+                currentAttempt++
+                val delayMs = (2.0.pow(currentAttempt) * 100).toLong() + Random.nextLong(0, 100)
+                delay(delayMs)
             } catch (e: Exception) {
                 if (currentAttempt >= maxRetries) {
                     throw e
