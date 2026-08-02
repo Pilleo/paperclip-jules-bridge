@@ -65,7 +65,7 @@ class RunRepository(private val jdbcTemplate: JdbcTemplate) {
             paperclipRunId
         )
 
-        return existingIds.first()
+        return existingIds.first() ?: runId
     }
 
     fun findByPaperclipRunId(paperclipRunId: String): Run? {
