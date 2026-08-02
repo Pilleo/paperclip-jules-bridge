@@ -45,7 +45,7 @@ class RestartRecoveryTest {
 
         Flyway.configure().dataSource(jdbcUrl, "", "").load().migrate()
 
-        val repository = RunRepository(jdbcUrl)
+        val repository = RunRepository(org.springframework.jdbc.core.JdbcTemplate(org.springframework.jdbc.datasource.DriverManagerDataSource(jdbcUrl)))
         val julesClient = JulesClient(julesServer.url("/").toString().removeSuffix("/"), "key")
         val paperclipClient = PaperclipClient(paperclipServer.url("/").toString().removeSuffix("/"), "token")
 

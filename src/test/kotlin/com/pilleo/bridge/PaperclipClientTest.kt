@@ -1,9 +1,5 @@
 package com.pilleo.bridge
 
-import io.ktor.client.*
-import io.ktor.client.engine.okhttp.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.MockResponse

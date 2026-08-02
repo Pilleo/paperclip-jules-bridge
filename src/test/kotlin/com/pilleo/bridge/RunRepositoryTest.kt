@@ -11,6 +11,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DriverManagerDataSource
 
 class RunRepositoryTest {
 
@@ -27,7 +29,9 @@ class RunRepositoryTest {
             .load()
             .migrate()
 
-        repository = RunRepository(jdbcUrl)
+        val ds = DriverManagerDataSource()
+        ds.url = jdbcUrl
+        repository = RunRepository(JdbcTemplate(ds))
     }
 
     @AfterEach

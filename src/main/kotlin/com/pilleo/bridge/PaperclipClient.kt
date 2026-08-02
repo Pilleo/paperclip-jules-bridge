@@ -1,17 +1,15 @@
 package com.pilleo.bridge
 
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.engine.okhttp.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.encodeToString
+import org.springframework.stereotype.Component
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.web.client.RestClient
+import org.springframework.web.client.HttpClientErrorException
+import org.springframework.http.MediaType
+import kotlinx.coroutines.delay
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -23,100 +21,112 @@ data class PaperclipIssue(
     val status: String,
     val priority: String?,
     val parentId: String?,
-    val project: JsonElement?
+    val project: JsonElement? = null
 )
 
 @Serializable
-data class IssuePatchRequest(
+data class IssueUpdateRequest(
     val status: String,
-    val comment: String
+    val comment: String? = null
 )
 
 @Serializable
 data class CallbackRequest(
     val status: String,
     val result: String,
-    val errorMessage: String?,
-    val usage: UsageMetrics? = null,
+    val errorMessage: String? = null,
+    val usage: UsageData? = null,
     val costUsd: Double? = null,
     val model: String? = null,
     val provider: String? = null
 )
 
 @Serializable
-data class UsageMetrics(
+data class UsageData(
     val inputTokens: Int,
     val outputTokens: Int,
     val cachedInputTokens: Int
 )
 
+@Component
 class PaperclipClient(
-    private val baseUrl: String,
-    private val token: String,
-    private val httpClient: HttpClient = HttpClient(OkHttp) {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true })
-        }
-    }
+    @Value("\${paperclip.baseUrl}") private val baseUrl: String,
+    @Value("\${bridge.authToken}") private val bridgeToken: String
 ) {
+    private val restClient = RestClient.create(baseUrl)
+    private val json = Json { ignoreUnknownKeys = true }
+
     suspend fun getIssue(issueId: String): PaperclipIssue? {
         return withRetry {
-            val response = httpClient.get("$baseUrl/api/issues/$issueId") {
-                header(HttpHeaders.Authorization, "Bearer $token")
+            try {
+                val responseString = restClient.get()
+                    .uri("/api/issues/{issueId}", issueId)
+                    .header("Authorization", "Bearer ${bridgeToken}")
+                    .retrieve()
+                    .body(String::class.java)
+                responseString?.let { json.decodeFromString<PaperclipIssue>(it) }
+            } catch (e: HttpClientErrorException.NotFound) {
+                null
+            } catch (e: Exception) {
+                throw e
             }
-            if (response.status == HttpStatusCode.NotFound) {
-                return@withRetry null
-            }
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException("Failed to fetch issue: ${response.status}")
-            }
-            response.body<PaperclipIssue>()
         }
     }
 
-    suspend fun updateIssueStatus(issueId: String, status: String, comment: String): Boolean {
+    suspend fun updateIssueStatus(issueId: String, status: String, comment: String? = null): Boolean {
         return withRetry {
-            val response = httpClient.patch("$baseUrl/api/issues/$issueId") {
-                header(HttpHeaders.Authorization, "Bearer $token")
-                contentType(ContentType.Application.Json)
-                setBody(IssuePatchRequest(status, comment))
+            try {
+                val req = IssueUpdateRequest(status, comment)
+                val bodyStr = json.encodeToString(req)
+                restClient.patch()
+                    .uri("/api/issues/{issueId}", issueId)
+                    .header("Authorization", "Bearer ${bridgeToken}")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(bodyStr)
+                    .retrieve()
+                    .toBodilessEntity()
+                true
+            } catch (e: HttpClientErrorException.UnprocessableEntity) {
+                false
+            } catch (e: Exception) {
+                throw e
             }
-            if (response.status == HttpStatusCode.UnprocessableEntity) {
-                // Return false to indicate reconciliation required
-                return@withRetry false
-            }
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException("Failed to patch issue: ${response.status}")
-            }
-            true
         }
     }
 
     suspend fun sendCallback(runId: String, request: CallbackRequest): Boolean {
         return withRetry {
-            val response = httpClient.post("$baseUrl/api/heartbeat-runs/$runId/callback") {
-                header(HttpHeaders.Authorization, "Bearer $token")
-                contentType(ContentType.Application.Json)
-                setBody(request)
+            try {
+                val bodyStr = json.encodeToString(request)
+                restClient.post()
+                    .uri("/api/heartbeat-runs/{runId}/callback", runId)
+                    .header("Authorization", "Bearer ${bridgeToken}")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(bodyStr)
+                    .retrieve()
+                    .toBodilessEntity()
+                true
+            } catch (e: Exception) {
+                throw e
             }
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException("Failed to send callback: ${response.status}")
-            }
-            true
         }
     }
 
-    private suspend fun <T> withRetry(maxRetries: Int = 3, block: suspend () -> T): T {
+    private suspend fun <T> withRetry(maxRetries: Int = 3, block: () -> T): T {
         var currentAttempt = 0
         while (true) {
             try {
                 return block()
+            } catch (e: HttpClientErrorException.NotFound) {
+                throw e
+            } catch (e: HttpClientErrorException.UnprocessableEntity) {
+                throw e
             } catch (e: Exception) {
                 if (currentAttempt >= maxRetries) {
                     throw e
                 }
                 currentAttempt++
-                val delayMs = (2.0.pow(currentAttempt) * 1000).toLong() + Random.nextLong(0, 1000)
+                val delayMs = (2.0.pow(currentAttempt) * 100).toLong() + Random.nextLong(0, 100)
                 delay(delayMs)
             }
         }
