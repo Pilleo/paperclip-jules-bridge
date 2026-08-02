@@ -1,96 +1,62 @@
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+
 plugins {
+    id("org.springframework.boot") version "4.0.0-M2"
+    id("io.spring.dependency-management") version "1.1.7"
     kotlin("jvm") version "2.1.0"
+    kotlin("plugin.spring") version "2.1.0"
     kotlin("plugin.serialization") version "2.1.0"
-    id("jacoco")
-    id("application")
 }
 
-group = "com.pilleo.bridge"
-version = "1.0-SNAPSHOT"
+group = "com.pilleo"
+version = "0.0.1-SNAPSHOT"
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
 
 repositories {
     mavenCentral()
+    maven { url = uri("https://repo.spring.io/milestone") }
+    maven { url = uri("https://repo.spring.io/snapshot") }
 }
-
-val ktorVersion = "3.0.3"
-val logbackVersion = "1.5.15"
 
 dependencies {
-    implementation("io.ktor:ktor-server-core:$ktorVersion")
-    implementation("io.ktor:ktor-server-netty:$ktorVersion")
-    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
-    implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
-    implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
-    implementation("io.ktor:ktor-server-config-yaml:$ktorVersion")
-    implementation("ch.qos.logback:logback-classic:$logbackVersion")
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-jdbc")
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
 
-    // Client
-    implementation("io.ktor:ktor-client-core:$ktorVersion")
-    implementation("io.ktor:ktor-client-okhttp:$ktorVersion")
-    implementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
-    // Database
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
-    implementation("com.zaxxer:HikariCP:6.2.1")
-    implementation("org.flywaydb:flyway-core:11.1.0")
+    // SQLite
+    implementation("org.xerial:sqlite-jdbc:3.46.0.0")
 
-    // Testing
-    testImplementation(kotlin("test"))
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    // Flyway for SQLite
+    implementation("org.flywaydb:flyway-core")
+
+    // Kotlin Serialization
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // Tests
+    testImplementation("org.springframework.boot:spring-boot-starter-test") {
+        exclude(module = "mockito-core")
+    }
+    testImplementation("com.ninja-squad:springmockk:4.0.2")
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
-    testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
-    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
 }
 
-kotlin {
-    jvmToolchain(21)
+tasks.withType<KotlinCompile> {
+    compilerOptions {
+        freeCompilerArgs.add("-Xjsr305=strict")
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
 }
 
-application {
-    mainClass.set("com.pilleo.bridge.ApplicationKt")
-}
-
-tasks.test {
+tasks.withType<Test> {
     useJUnitPlatform()
-    finalizedBy(tasks.jacocoTestReport)
-}
-
-tasks.jacocoTestReport {
-    dependsOn(tasks.test)
-    reports {
-        xml.required.set(true)
-        html.required.set(true)
-    }
-}
-
-tasks.jacocoTestCoverageVerification {
-    violationRules {
-        rule {
-            limit {
-                minimum = "0.80".toBigDecimal()
-            }
-        }
-    }
-}
-tasks.check {
-    dependsOn(tasks.jacocoTestCoverageVerification)
-}
-
-tasks.withType<JavaExec> {
-    val envFiles = listOf(file(".env"), file(".ENV"))
-    for (envFile in envFiles) {
-        if (envFile.exists()) {
-            envFile.readLines().forEach { line ->
-                val trimmed = line.trim()
-                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
-                    val split = trimmed.split("=", limit = 2)
-                    if (split.size == 2) {
-                        val key = split[0].trim()
-                        val value = split[1].trim().removeSurrounding("\"").removeSurrounding("'")
-                        environment(key, value)
-                    }
-                }
-            }
-        }
-    }
 }

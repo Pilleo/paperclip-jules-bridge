@@ -1,16 +1,14 @@
 package com.pilleo.bridge
 
-import io.ktor.client.*
-import io.ktor.client.call.*
-import io.ktor.client.engine.okhttp.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.client.request.*
-import io.ktor.client.statement.*
-import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
-import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
+import org.springframework.stereotype.Component
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.web.client.RestClient
+import org.springframework.web.client.HttpClientErrorException
+import org.springframework.http.MediaType
+import kotlinx.coroutines.delay
 import kotlin.math.pow
 import kotlin.random.Random
 
@@ -51,59 +49,59 @@ data class JulesPullRequest(
     val url: String
 )
 
+@Component
 class JulesClient(
-    private val baseUrl: String,
-    private val apiKey: String,
-    private val httpClient: HttpClient = HttpClient(OkHttp) {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true })
-        }
-    }
+    @Value("\${jules.apiBaseUrl}") private val baseUrl: String,
+    @Value("\${jules.apiKey}") private val apiKey: String
 ) {
+    private val restClient = RestClient.create(baseUrl)
+    private val json = Json { ignoreUnknownKeys = true }
+
     suspend fun createSession(request: JulesSessionRequest): JulesSession {
         return withRetry {
-            val response = httpClient.post("$baseUrl/sessions") {
-                header("x-goog-api-key", apiKey)
-                contentType(ContentType.Application.Json)
-                setBody(request)
-            }
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException("Failed to create Jules session: ${response.status}")
-            }
-            response.body<JulesSession>()
+            val bodyString = json.encodeToString(request)
+            val responseString = restClient.post()
+                .uri("/sessions")
+                .header("x-goog-api-key", apiKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(bodyString)
+                .retrieve()
+                .body(String::class.java)
+                ?: throw IllegalStateException("Failed to parse response body")
+            json.decodeFromString<JulesSession>(responseString)
         }
     }
 
     suspend fun getSession(sessionId: String): JulesSession {
         return withRetry {
-            val response = httpClient.get("$baseUrl/sessions/$sessionId") {
-                header("x-goog-api-key", apiKey)
-            }
-            if (!response.status.isSuccess()) {
-                throw IllegalStateException("Failed to fetch Jules session: ${response.status}")
-            }
-            response.body<JulesSession>()
+            val responseString = restClient.get()
+                .uri("/sessions/{sessionId}", sessionId)
+                .header("x-goog-api-key", apiKey)
+                .retrieve()
+                .body(String::class.java)
+                ?: throw IllegalStateException("Failed to parse response body")
+            json.decodeFromString<JulesSession>(responseString)
         }
     }
 
-    suspend fun validateAuth() {
-        val response = try {
-            httpClient.get("$baseUrl/sessions?pageSize=1") {
-                header("x-goog-api-key", apiKey)
+    fun validateAuth() {
+        try {
+            restClient.get()
+                .uri("/sessions?pageSize=1")
+                .header("x-goog-api-key", apiKey)
+                .retrieve()
+                .toBodilessEntity()
+        } catch (e: HttpClientErrorException) {
+            if (e.statusCode.value() == 401 || e.statusCode.value() == 403) {
+                throw IllegalStateException("Jules API Key is invalid or unauthorized: ${e.statusCode}")
             }
+            throw IllegalStateException("Jules API Auth validation failed with unexpected status: ${e.statusCode}", e)
         } catch (e: Exception) {
             throw IllegalStateException("Network failure reaching Jules API for validation", e)
         }
-
-        if (response.status == HttpStatusCode.Unauthorized || response.status == HttpStatusCode.Forbidden) {
-            throw IllegalStateException("Jules API Key is invalid or unauthorized: ${response.status}")
-        }
-        if (!response.status.isSuccess()) {
-             throw IllegalStateException("Jules API Auth validation failed with unexpected status: ${response.status}")
-        }
     }
 
-    private suspend fun <T> withRetry(maxRetries: Int = 3, block: suspend () -> T): T {
+    private suspend fun <T> withRetry(maxRetries: Int = 3, block: () -> T): T {
         var currentAttempt = 0
         while (true) {
             try {
@@ -113,7 +111,7 @@ class JulesClient(
                     throw e
                 }
                 currentAttempt++
-                val delayMs = (2.0.pow(currentAttempt) * 1000).toLong() + Random.nextLong(0, 1000)
+                val delayMs = (2.0.pow(currentAttempt) * 100).toLong() + Random.nextLong(0, 100)
                 delay(delayMs)
             }
         }

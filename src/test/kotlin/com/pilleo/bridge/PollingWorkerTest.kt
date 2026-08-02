@@ -36,7 +36,7 @@ class PollingWorkerTest {
             .load()
             .migrate()
 
-        repository = RunRepository(jdbcUrl)
+        repository = RunRepository(org.springframework.jdbc.core.JdbcTemplate(org.springframework.jdbc.datasource.DriverManagerDataSource(jdbcUrl)))
 
         julesServer = MockWebServer()
         julesServer.start()

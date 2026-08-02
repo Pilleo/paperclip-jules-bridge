@@ -1,27 +1,34 @@
-ktor:
-  deployment:
-    port: 8080
+server:
+  port: 8080
+
+spring:
   application:
-    modules:
-      - com.pilleo.bridge.ApplicationKt.module
+    name: paperclip-jules-bridge
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:sqlite:runs.sqlite}
+    driver-class-name: org.sqlite.JDBC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
 
 bridge:
-  authToken: "$BRIDGE_AUTH_TOKEN"
-  allowedRepositories:
-    - "Pilleo/mazewall"
-  invariantsFile: "$BRIDGE_INVARIANTS_FILE"
+  authToken: ${BRIDGE_AUTH_TOKEN:default-auth-token}
+  allowedRepositories: ${BRIDGE_ALLOWED_REPOS:Pilleo/mazewall}
+  invariantsFile: ${BRIDGE_INVARIANTS_FILE:/config/invariants.md}
 
 jules:
-  apiBaseUrl: "https://jules.googleapis.com/v1alpha"
-  apiKey: "$JULES_API_KEY"
+  apiBaseUrl: ${JULES_API_BASE_URL:https://jules.googleapis.com/v1alpha}
+  apiKey: ${JULES_API_KEY:default-jules-key}
   requirePlanApproval: false
   automationMode: "AUTO_CREATE_PR"
 
 paperclip:
-  baseUrl: "$PAPERCLIP_BASE_URL"
-  apiToken: "$PAPERCLIP_API_TOKEN"
+  baseUrl: ${PAPERCLIP_BASE_URL:http://localhost:8080}
+  apiToken: ${PAPERCLIP_API_TOKEN:default-paperclip-token}
 
 polling:
   intervalSeconds: 45
-  maxIntervalSeconds: 300
   maxSessionAgeHours: 12

@@ -51,7 +51,7 @@ class PollingWorker(
                 try {
                     processRun(run)
                 } catch (e: Exception) {
-                    logger.error("Failed to process run ${run.id}", e)
+                    logger.error("Failed to process run \${run.id}", e)
                 }
             }
         }
@@ -107,7 +107,7 @@ class PollingWorker(
         if (run.callbackDeliveredAt == null) {
             val callbackReq = CallbackRequest(
                 status = "failed",
-                result = "Bridge timeout after $maxSessionAgeHours hours.",
+                result = "Bridge timeout after \${maxSessionAgeHours} hours.",
                 errorMessage = "Bridge timeout"
             )
             val success = paperclipClient.sendCallback(run.paperclipRunId, callbackReq)
@@ -125,7 +125,7 @@ class PollingWorker(
 
         val callbackReq = CallbackRequest(
             status = status,
-            result = run.prUrl?.let { "PR Created: $it" } ?: "Session completed without PR.",
+            result = run.prUrl?.let { "PR Created: \${it}" } ?: "Session completed without PR.",
             errorMessage = if (!isSuccess) "Jules session failed" else null
         )
 
@@ -135,7 +135,7 @@ class PollingWorker(
                 paperclipClient.updateIssueStatus(
                     issueId = run.paperclipTaskId,
                     status = "in_review",
-                    comment = "Jules created a PR: ${run.prUrl}"
+                    comment = "Jules created a PR: \${run.prUrl}"
                 )
             } catch (e: Exception) {
                 logger.warn("Failed to update issue status to in_review", e)

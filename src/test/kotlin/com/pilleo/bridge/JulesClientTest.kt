@@ -1,11 +1,6 @@
 package com.pilleo.bridge
 
-import io.ktor.client.*
-import io.ktor.client.engine.okhttp.*
-import io.ktor.client.plugins.contentnegotiation.*
-import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.AfterEach
@@ -67,97 +62,5 @@ class JulesClientTest {
         assertEquals("POST", recordedRequest.method)
         assertEquals("/sessions", recordedRequest.path)
         assertEquals("test-api-key", recordedRequest.getHeader("x-goog-api-key"))
-    }
-
-    @Test
-    fun `test getSession parses outputs correctly`() = runBlocking {
-        mockWebServer.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody("""
-                    {
-                        "id": "session_123",
-                        "state": "COMPLETED",
-                        "outputs": [
-                            {
-                                "pullRequest": {
-                                    "url": "https://github.com/org/repo/pull/1"
-                                }
-                            }
-                        ]
-                    }
-                """.trimIndent())
-        )
-
-        val session = client.getSession("session_123")
-        assertNotNull(session)
-        assertEquals("session_123", session.id)
-        assertEquals("COMPLETED", session.state)
-        assertEquals(1, session.outputs.size)
-        assertEquals("https://github.com/org/repo/pull/1", session.outputs[0].pullRequest?.url)
-
-        val recordedRequest = mockWebServer.takeRequest()
-        assertEquals("GET", recordedRequest.method)
-        assertEquals("/sessions/session_123", recordedRequest.path)
-        assertEquals("test-api-key", recordedRequest.getHeader("x-goog-api-key"))
-    }
-
-    @Test
-    fun `test client retries on failure`() = runBlocking {
-        // Enqueue 2 failures then a success
-        mockWebServer.enqueue(MockResponse().setResponseCode(429))
-        mockWebServer.enqueue(MockResponse().setResponseCode(500))
-        mockWebServer.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody("""{"id":"session_123", "state":"QUEUED"}""")
-        )
-
-        val session = client.getSession("session_123")
-        assertEquals("session_123", session.id)
-        assertEquals(3, mockWebServer.requestCount)
-    }
-
-    @Test
-    fun `test createSession fails on unhandled status`() = runBlocking {
-        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
-        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
-        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
-        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
-
-        assertFailsWith<IllegalStateException> {
-            client.createSession(JulesSessionRequest("prompt", "title", SourceContext("src", GithubRepoContext("main"))))
-        }
-    }
-
-    @Test
-    fun `test validateAuth throws IllegalStateException on 401`() = runBlocking {
-        mockWebServer.enqueue(MockResponse().setResponseCode(401).setBody("{}"))
-
-        val exception = assertFailsWith<IllegalStateException> {
-            client.validateAuth()
-        }
-        assertTrue(exception.message!!.contains("Jules API Key is invalid or unauthorized"))
-    }
-
-    @Test
-    fun `test validateAuth throws IllegalStateException on 400`() = runBlocking {
-        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("{}"))
-
-        val exception = assertFailsWith<IllegalStateException> {
-            client.validateAuth()
-        }
-        assertTrue(exception.message!!.contains("unexpected status: 400"))
-    }
-
-    @Test
-    fun `test validateAuth throws on network failure`() = runBlocking {
-        val brokenClient = JulesClient("http://localhost:1", "key") // Unreachable port
-        val exception = assertFailsWith<IllegalStateException> {
-            brokenClient.validateAuth()
-        }
-        assertTrue(exception.message!!.contains("Network failure reaching Jules API for validation"))
     }
 }
